@@ -2,6 +2,156 @@
 
 require File.join(File.expand_path(File.dirname(__FILE__)), "spec_helper")
 
+describe "Text::Formatted::Box with :fallback_fonts option that includes" +
+  "a Chinese font and set of Chinese glyphs not in the current font" do
+  it "should change the font to the Chinese font for the Chinese glyphs" do
+    create_pdf
+    file = "#{Prawn::BASEDIR}/data/fonts/gkai00mp.ttf"
+    @pdf.font_families["Kai"] = {
+      :normal => { :file => file, :font => "Kai" }
+    }
+    formatted_text = [{ :text => "hello你好" },
+                      { :text => "再见goodbye" }]
+    @pdf.formatted_text_box(formatted_text, :fallback_fonts => ["Kai"])
+
+    text = PDF::Inspector::Text.analyze(@pdf.render)
+
+    fonts_used = text.font_settings.map { |e| e[:name] }
+    fonts_used.length.should == 4
+    fonts_used[0].should == :"Helvetica"
+    fonts_used[1].to_s.should =~ /GBZenKai-Medium/
+    fonts_used[2].to_s.should =~ /GBZenKai-Medium/
+    fonts_used[3].should == :"Helvetica"
+
+    text.strings[0].should == "hello"
+    text.strings[1].should == "你好"
+    text.strings[2].should == "再见"
+    text.strings[3].should == "goodbye"
+  end
+end
+
+describe "Text::Formatted::Box with :fallback_fonts option that includes" +
+  "an AFM font and Win-Ansi glyph not in the current Chinese font" do
+  it "should change the font to the AFM font for the Win-Ansi glyph" do
+    create_pdf
+    file = "#{Prawn::BASEDIR}/data/fonts/gkai00mp.ttf"
+    @pdf.font_families["Kai"] = {
+      :normal => { :file => file, :font => "Kai" }
+    }
+    @pdf.font("Kai")
+    formatted_text = [{ :text => "hello你好" },
+                      { :text => "再见€" }]
+    @pdf.formatted_text_box(formatted_text, :fallback_fonts => ["Helvetica"])
+
+    text = PDF::Inspector::Text.analyze(@pdf.render)
+
+    fonts_used = text.font_settings.map { |e| e[:name] }
+    fonts_used.length.should == 4
+    fonts_used[0].to_s.should =~ /GBZenKai-Medium/
+    fonts_used[1].to_s.should =~ /GBZenKai-Medium/
+    fonts_used[2].to_s.should =~ /GBZenKai-Medium/
+    fonts_used[3].should == :"Helvetica"
+
+    text.strings[0].should == "hello"
+    text.strings[1].should == "你好"
+    text.strings[2].should == "再见"
+    text.strings[3].should == "€"
+  end
+end
+
+describe "Text::Formatted::Box with :fallback_fonts option and fragment " +
+  "level font" do
+  it "should use the fragment level font except for glyphs not in that font" do
+    create_pdf
+    file = "#{Prawn::BASEDIR}/data/fonts/gkai00mp.ttf"
+    @pdf.font_families["Kai"] = {
+      :normal => { :file => file, :font => "Kai" }
+    }
+    formatted_text = [{ :text => "hello你好" },
+                      { :text => "再见goodbye", :font => "Times-Roman" }]
+    @pdf.formatted_text_box(formatted_text, :fallback_fonts => ["Kai"])
+
+    text = PDF::Inspector::Text.analyze(@pdf.render)
+
+    fonts_used = text.font_settings.map { |e| e[:name] }
+    fonts_used.length.should == 4
+    fonts_used[0].should == :"Helvetica"
+    fonts_used[1].to_s.should =~ /GBZenKai-Medium/
+    fonts_used[2].to_s.should =~ /GBZenKai-Medium/
+    fonts_used[3].should == :"Times-Roman"
+
+    text.strings[0].should == "hello"
+    text.strings[1].should == "你好"
+    text.strings[2].should == "再见"
+    text.strings[3].should == "goodbye"
+  end
+end
+
+describe "Text::Formatted::Box" do
+  before(:each) do
+    create_pdf
+    file = "#{Prawn::BASEDIR}/data/fonts/gkai00mp.ttf"
+    @pdf.font_families["Kai"] = {
+      :normal => { :file => file, :font => "Kai" }
+    }
+    @formatted_text = [{ :text => "hello你好" }]
+    @pdf.fallback_fonts(["Kai"])
+    @pdf.fallback_fonts = ["Kai"]
+  end
+  it "#fallback_fonts should return the document-wide fallback fonts" do
+    @pdf.fallback_fonts.should == ["Kai"]
+  end
+  it "should be able to set text fallback_fonts document-wide" do
+    @pdf.formatted_text_box(@formatted_text)
+
+    text = PDF::Inspector::Text.analyze(@pdf.render)
+
+    fonts_used = text.font_settings.map { |e| e[:name] }
+    fonts_used.length.should == 2
+    fonts_used[0].should == :"Helvetica"
+    fonts_used[1].to_s.should =~ /GBZenKai-Medium/
+  end
+  it "should be able to override document-wide fallback_fonts" do
+    @pdf.formatted_text_box(@formatted_text, :fallback_fonts => ["Courier"])
+
+    text = PDF::Inspector::Text.analyze(@pdf.render)
+
+    fonts_used = text.font_settings.map { |e| e[:name] }
+    fonts_used.length.should == 1
+    fonts_used[0].should == :"Helvetica"
+  end
+  it "should omit the fallback fonts overhead when passing an empty array " +
+    "as the :fallback_fonts" do
+    box = Prawn::Text::Formatted::Box.new(@formatted_text,
+                                          :document => @pdf,
+                                          :fallback_fonts => [])
+    box.expects(:process_fallback_fonts).never
+    box.render
+  end
+  it "should be able to clear document-wide fallback_fonts" do
+    @pdf.fallback_fonts([])
+    box = Prawn::Text::Formatted::Box.new(@formatted_text,
+                                          :document => @pdf)
+    box.expects(:process_fallback_fonts).never
+    box.render
+  end
+end
+
+describe "Text::Formatted::Box with :fallback_fonts option " +
+  "with glyphs not in the primary or the fallback fonts" do
+  it "should use the primary font" do
+    create_pdf
+    formatted_text = [{ :text => "hello world. 世界你好。" }]
+    @pdf.formatted_text_box(formatted_text, :fallback_fonts => ["Helvetica"])
+
+    text = PDF::Inspector::Text.analyze(@pdf.render)
+
+    fonts_used = text.font_settings.map { |e| e[:name] }
+    fonts_used.length.should == 1
+    fonts_used[0].should == :"Helvetica"
+  end
+end
+
 describe "Text::Formatted::Box#extensions" do
   it "should be able to override default line wrapping" do
     create_pdf
@@ -47,17 +197,19 @@ describe "Text::Formatted::Box#render" do
     text_box.render
     text_box.text.should == "hello\nworld"
   end
-  it "should omit spaces from the end of the line" do
+  it "should be okay printing a line of whitespace" do
     create_pdf
-    array = [{ :text => "hello \nworld "}]
+    array = [{ :text => "hello\n    \nworld"}]
     options = { :document => @pdf }
     text_box = Prawn::Text::Formatted::Box.new(array, options)
     text_box.render
-    text_box.text.should == "hello\nworld"
-  end
-  it "should be okay printing a line of whitespace" do
-    create_pdf
-    array = [{ :text => "hello\n    \nworld "}]
+    text_box.text.should == "hello\n\nworld"
+
+
+    array = [{ :text => "hello" + " " * 500},
+             { :text => " " * 500 },
+             { :text => " " * 500 + "\n"},
+             { :text => "world"}]
     options = { :document => @pdf }
     text_box = Prawn::Text::Formatted::Box.new(array, options)
     text_box.render
@@ -65,18 +217,20 @@ describe "Text::Formatted::Box#render" do
   end
   it "should enable fragment level direction setting" do
     create_pdf
+    number_of_hellos = 18
     array = [
-             { :text => "Hello " },
-             { :text => "world", :direction => :rtl },
+             { :text => "hello " * number_of_hellos },
+             { :text => "world", :direction => :ltr },
              { :text => ", how are you?" }
             ]
-    options = { :document => @pdf }
+    options = { :document => @pdf, :direction => :rtl }
     text_box = Prawn::Text::Formatted::Box.new(array, options)
     text_box.render
     text = PDF::Inspector::Text.analyze(@pdf.render)
-    text.strings[0].should == "Hello "
-    text.strings[1].should == "dlrow"
-    text.strings[2].should == ", how are you?"
+    text.strings[0].should == "era woh ,"
+    text.strings[1].should == "world"
+    text.strings[2].should == " olleh" * number_of_hellos
+    text.strings[3].should == "?uoy"
   end
 end
 
@@ -262,7 +416,7 @@ describe "Text::Formatted::Box#render" do
     text_box = Prawn::Text::Formatted::Box.new(array, :document => @pdf)
     text_box.render
     @pdf.font_size(24) do
-      text_box.height.should.be.close(@pdf.font.height, 0.001)
+      text_box.height.should.be.close(@pdf.font.ascender + @pdf.font.descender, 0.001)
     end
   end
   it "should be able to set color via an rgb hex string" do
@@ -309,6 +463,20 @@ describe "Text::Formatted::Box#render with fragment level :character_spacing opt
     text_box = Prawn::Text::Formatted::Box.new(array, options)
     text_box.render
     text_box.text.should == "hello\nworld"
+  end
+end
+
+describe "Text::Formatted::Box#render with :align => :justify" do
+  it "should not justify the last line of a paragraph" do
+    create_pdf
+    array = [{ :text => "hello world " },
+             { :text => "\n" },
+             { :text => "goodbye" }]
+    options = { :document => @pdf, :align => :justify }
+    text_box = Prawn::Text::Formatted::Box.new(array, options)
+    text_box.render
+    contents = PDF::Inspector::Text.analyze(@pdf.render)
+    contents.word_spacing.should.be.empty
   end
 end
 

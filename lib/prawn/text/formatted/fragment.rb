@@ -28,17 +28,26 @@ module Prawn
         end
 
         def text
+          string = strip_zero_width_spaces(@text)
+          if exclude_trailing_white_space?
+            string = string.rstrip
+            string = process_soft_hyphens(string)
+          end
           case direction
           when :rtl
-            @text.reverse
+            if ruby_18 { true }
+              string.scan(/./mu).reverse.join
+            else
+              string.reverse
+            end
           else
-            @text
+            string
           end
         end
 
         def width
           if @word_spacing == 0 then @width
-          else @width + @word_spacing * @text.count(" ")
+          else @width + @word_spacing * space_count
           end
         end
 
@@ -121,6 +130,15 @@ module Prawn
           @format_state[:direction] = direction unless @format_state[:direction]
         end
 
+        def include_trailing_white_space!
+          @format_state.delete(:exclude_trailing_white_space)
+        end
+
+        def space_count
+          string = exclude_trailing_white_space? ? @text.rstrip : @text
+          string.count(" ")
+        end
+
         def callback_objects
           callback = @format_state[:callback]
           if callback.nil?
@@ -190,6 +208,32 @@ module Prawn
 
         def absolute_bottom_right
           [absolute_right, absolute_bottom]
+        end
+
+        private
+
+        def exclude_trailing_white_space?
+          @format_state[:exclude_trailing_white_space]
+        end
+
+        def normalized_soft_hyphen
+          @format_state[:normalized_soft_hyphen]
+        end
+
+        def process_soft_hyphens(string)
+          if string.length > 0 && normalized_soft_hyphen
+            string[0..-2].gsub(normalized_soft_hyphen, "") + string[-1..-1]
+          else
+            string
+          end
+        end
+
+        def strip_zero_width_spaces(string)
+          if !"".respond_to?(:encoding) || string.encoding.to_s == "UTF-8"
+            string.gsub(Prawn::Text::ZWSP, "")
+          else
+            string
+          end
         end
 
       end

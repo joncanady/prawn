@@ -15,8 +15,7 @@ module Prawn
 
           # See the developer documentation for Prawn::Core::Text#wrap
           #
-          # Formatted#wrap should set some of the variables slightly differently
-          # than Text#wrap;
+          # Formatted#wrap should set the following variables:
           #   <tt>@line_height</tt>::
           #        the height of the tallest fragment in the last printed line
           #   <tt>@descender</tt>::
@@ -25,60 +24,76 @@ module Prawn
           #   <tt>@ascender</tt>::
           #        the ascender heigth of the tallest fragment in the last
           #        printed line
+          #   <tt>@baseline_y</tt>::
+          #       the baseline of the current line
+          #   <tt>@nothing_printed</tt>::
+          #       set to true until something is printed, then false
+          #   <tt>@everything_printed</tt>::
+          #       set to false until everything printed, then true
           #
           # Returns any formatted text that was not printed
           #
           def wrap(array) #:nodoc:
             initialize_wrap(array)
 
-            move_baseline = true
-            while @arranger.unfinished?
-              printed_fragments = []
-              fragments_this_line = []
+            stop = false
+            while !stop
+              @line_wrap.wrap_line(:document => @document,
+                                   :kerning => @kerning,
+                                   :width => available_width,
+                                   :arranger => @arranger)
 
-              line_to_print = @line_wrap.wrap_line(:document => @document,
-                                                   :kerning => @kerning,
-                                                   :width => available_width,
-                                                   :arranger => @arranger)
-
-              move_baseline = false
-              break unless enough_height_for_this_line?
-              move_baseline_down
-
-              accumulated_width = 0
-              word_spacing = word_spacing_for_this_line
-              while fragment = @arranger.retrieve_fragment
-                fragment.word_spacing = word_spacing
-                if fragment.text == "\n"
-                  printed_fragments << "\n" if @printed_lines.last == ""
-                  break
-                end
-                printed_fragments << fragment.text
-                fragments_this_line << [fragment, accumulated_width]
-                accumulated_width += fragment.width
+              if enough_height_for_this_line?
+                move_baseline_down
+                print_line
+              else
+                stop = true
               end
-              fragments_this_line.reverse! if @direction == :rtl
-              fragments_this_line.each do |fragment, accumulated_width|
-                fragment.default_direction = @direction
-                format_and_draw_fragment(fragment, accumulated_width,
-                                         @line_wrap.width, word_spacing)
-              end
-              @printed_lines << printed_fragments.join("")
-              break if @single_line
-              move_baseline = true unless @arranger.finished?
+
+              stop ||= @single_line || @arranger.finished?
             end
-            move_baseline_down if move_baseline
             @text = @printed_lines.join("\n")
-
+            @everything_printed = @arranger.finished?
             @arranger.unconsumed
           end
 
           private
 
+          def print_line
+            @nothing_printed = false
+            printed_fragments = []
+            fragments_this_line = []
+
+            word_spacing = word_spacing_for_this_line
+            while fragment = @arranger.retrieve_fragment
+              fragment.word_spacing = word_spacing
+              if fragment.text == "\n"
+                printed_fragments << "\n" if @printed_lines.last == ""
+                break
+              end
+              printed_fragments << fragment.text
+              fragments_this_line << fragment
+            end
+
+            accumulated_width = 0
+            fragments_this_line.reverse! if @direction == :rtl
+            fragments_this_line.each do |fragment|
+              fragment.default_direction = @direction
+              format_and_draw_fragment(fragment, accumulated_width,
+                                       @line_wrap.width, word_spacing)
+              accumulated_width += fragment.width
+            end
+
+            if "".respond_to?(:force_encoding)
+              printed_fragments.map! { |s| s.force_encoding("utf-8") }
+            end
+            @printed_lines << printed_fragments.join
+          end
+
           def word_spacing_for_this_line
             if @align == :justify &&
                 @line_wrap.space_count > 0 &&
-                @line_wrap.width.to_f / available_width.to_f >= 0.75
+                !@line_wrap.paragraph_finished?
               (available_width - @line_wrap.width) / @line_wrap.space_count
             else
               0
@@ -89,8 +104,13 @@ module Prawn
             @line_height = @arranger.max_line_height
             @descender   = @arranger.max_descender
             @ascender    = @arranger.max_ascender
-            required_height = @baseline_y == 0 ? @line_height : @line_height + @descender
-            if @baseline_y.abs + required_height > @height
+            if @baseline_y == 0
+              diff = @ascender + @descender
+            else
+              diff = @descender + @line_height
+            end
+            required_total_height = @baseline_y.abs + diff
+            if required_total_height > @height
               # no room for the full height of this line
               @arranger.repack_unretrieved
               false
@@ -110,6 +130,8 @@ module Prawn
             @baseline_y  = 0
 
             @printed_lines = []
+            @nothing_printed = true
+            @everything_printed = false
           end
 
           def format_and_draw_fragment(fragment, accumulated_width,

@@ -16,7 +16,12 @@ module Prawn
     include Prawn::Core::Text
     include Prawn::Text::Formatted
 
+    # No-Break Space
     Prawn::Text::NBSP = " "
+    # Zero Width Space (indicate word boundaries without a space)
+    Prawn::Text::ZWSP = [8203].pack("U")
+    # Soft Hyphen (invisible, except when causing a line break)
+    Prawn::Text::SHY = "­"
 
     # If you want text to flow onto a new page or between columns, this is the
     # method to use. If, instead, if you want to place bounded text outside of
@@ -113,6 +118,13 @@ module Prawn
     # <tt>:direction</tt>::
     #     <tt>:ltr</tt>, <tt>:rtl</tt>, Direction of the text (left-to-right
     #     or right-to-left) [value of document.text_direction]
+    # <tt>:fallback_fonts</tt>::
+    #     An array of font names. Each name must be the name of an AFM font or
+    #     the name that was used to register a family of TTF fonts (see
+    #     Prawn::Document#font_families). If present, then each glyph will be
+    #     rendered using the first font that includes the glyph, starting with
+    #     the current font and then moving through :fallback_fonts from
+    #     left to right.
     # <tt>:align</tt>::
     #     <tt>:left</tt>, <tt>:center</tt>, <tt>:right</tt>, or
     #     <tt>:justify</tt> Alignment within the bounding box
@@ -174,10 +186,7 @@ module Prawn
     # Same as for #text
     #
     def formatted_text(array, options={})
-      # we modify the options. don't change the user's hash
-      options = options.dup
-
-      inspect_options_for_text(options)
+      options = inspect_options_for_text(options.dup)
 
       if @indent_paragraphs
         Text::Formatted::Parser.array_paragraphs(array).each do |paragraph|
@@ -185,11 +194,16 @@ module Prawn
           remaining_text = draw_indented_formatted_line(paragraph, options)
           options[:skip_encoding] = true
 
-          if remaining_text == paragraph || remaining_text.length > paragraph.length
-            # we were too close to the bottom of the page to print even one line
-            @bounding_box.move_past_bottom
-            remaining_text = draw_indented_formatted_line(paragraph, options)
+          if @no_text_printed
+            # unless this paragraph was an empty line
+            unless @all_text_printed
+              @bounding_box.move_past_bottom
+              options[:skip_encoding] = false
+              remaining_text = draw_indented_formatted_line(paragraph, options)
+              options[:skip_encoding] = true
+            end
           end
+
           remaining_text = fill_formatted_text_box(remaining_text, options)
           draw_remaining_formatted_text_on_new_pages(remaining_text, options)
         end
@@ -254,9 +268,8 @@ module Prawn
     # Raises <tt>ArgumentError</tt> if <tt>:align</tt> option included
     #
     def draw_text(text, options)
-      # we modify the options. don't change the user's hash
-      options = options.dup
-      inspect_options_for_draw_text(options)
+      options = inspect_options_for_draw_text(options.dup)
+
       # dup because normalize_encoding changes the string
       text = text.to_s.dup
       save_font do
@@ -307,8 +320,8 @@ module Prawn
                                         :document => self))
       printed = box.render(:dry_run => true)
 
-      height = box.height - (box.line_height - box.ascender)
-      height += box.line_height + box.leading - box.ascender if @final_gap
+      height = box.height
+      height += box.line_gap + box.leading if @final_gap
       height
     end
 
@@ -333,11 +346,12 @@ module Prawn
       merge_text_box_positioning_options(options)
       box = Text::Formatted::Box.new(text, options)
       remaining_text = box.render
+      @no_text_printed = box.nothing_printed?
+      @all_text_printed = box.everything_printed?
 
-      self.y -= box.height - (box.line_height - box.ascender)
-      if @final_gap
-        self.y -= box.line_height + box.leading - box.ascender
-      end
+      self.y -= box.height
+      self.y -= box.line_gap + box.leading if @final_gap
+
       remaining_text
     end
 
@@ -362,6 +376,7 @@ module Prawn
       end
       valid_options = Prawn::Core::Text::VALID_OPTIONS + [:at, :rotate]
       Prawn.verify_options(valid_options, options)
+      options
     end
 
     def inspect_options_for_text(options)
@@ -372,6 +387,7 @@ module Prawn
       process_final_gap_option(options)
       process_indent_paragraphs_option(options)
       options[:document] = self
+      options
     end
 
     def process_final_gap_option(options)

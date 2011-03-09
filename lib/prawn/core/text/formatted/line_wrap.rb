@@ -22,9 +22,11 @@ module Prawn
           end
 
           # The number of spaces in the last wrapped line
-          #
-          def space_count
-            @space_count
+          attr_reader :space_count
+
+          # Whether this line is the last line in the paragraph
+          def paragraph_finished?
+            @newline_encountered || is_next_string_newline? || @arranger.finished?
           end
 
           # Work in conjunction with the Prawn::Core::Formatted::Arranger
@@ -35,25 +37,15 @@ module Prawn
             initialize_line(options)
 
             while fragment = @arranger.next_string
-              @output = ""
-              preview = @arranger.preview_next_string
+              @fragment_output = ""
 
-              fragment.lstrip! if @line_output.empty? && fragment != "\n"
-              if @line_output.empty? && fragment.empty? && preview == "\n"
-                # this line was just whitespace followed by a newline, which is
-                # equivalent to just a newline
-                @arranger.update_last_string("", "")
-                next
-              end
-              
-              if !add_fragment_to_line(fragment)
-                fragment_finished(fragment, true)
+              fragment.lstrip! if first_fragment_on_this_line?(fragment)
+              next if empty_line?(fragment)
+
+              unless apply_font_settings_and_add_fragment_to_line(fragment)
                 break
               end
-              
-              fragment_finished(fragment, preview == "\n" || preview.nil?)
             end
-
             @arranger.finalize_line
             @accumulated_width = @arranger.line_width
             @space_count = @arranger.space_count
@@ -61,6 +53,60 @@ module Prawn
           end
 
           private
+
+          def first_fragment_on_this_line?(fragment)
+            line_empty? && fragment != "\n"
+          end
+
+          def empty_line?(fragment)
+            empty = line_empty? && fragment.empty? && is_next_string_newline?
+            @arranger.update_last_string("", "", soft_hyphen) if empty
+            empty
+          end
+
+          def is_next_string_newline?
+            @arranger.preview_next_string == "\n"
+          end
+
+          def apply_font_settings_and_add_fragment_to_line(fragment)
+            result = nil
+            @arranger.apply_font_settings do
+              result = add_fragment_to_line(fragment)
+            end
+            result
+          end
+
+          # returns true iff all text was printed without running into the end of
+          # the line
+          #
+          def add_fragment_to_line(fragment)
+            if fragment == ""
+              true
+            elsif fragment == "\n"
+              @newline_encountered = true
+              false
+            else
+              fragment.scan(scan_pattern).each do |segment|
+                if segment == zero_width_space
+                  segment_width = 0
+                else
+                  segment_width = @document.width_of(segment, :kerning => @kerning)
+                end
+
+                if @accumulated_width + segment_width <= @width
+                  @accumulated_width += segment_width
+                  @fragment_output += segment
+                else
+                  end_of_the_line_reached(segment)
+                  fragment_finished(fragment)
+                  return false
+                end
+              end
+
+              fragment_finished(fragment)
+              true
+            end
+          end
 
           # The pattern used to determine chunks of text to place on a given line
           #
@@ -79,7 +125,7 @@ module Prawn
           # word breaking is needed
           #
           def word_division_scan_pattern
-            new_regexp("\\s|[#{hyphen}#{soft_hyphen}]")
+            new_regexp("\\s|[#{zero_width_space}#{soft_hyphen}#{hyphen}]")
           end
 
           def break_chars
@@ -87,7 +133,7 @@ module Prawn
           end
 
           def whitespace
-            " \\t"
+            " \\t#{zero_width_space}"
           end
 
           def hyphen
@@ -95,7 +141,15 @@ module Prawn
           end
 
           def soft_hyphen
-            @document.font.normalize_encoding("­")
+            @document.font.normalize_encoding(Prawn::Text::SHY)
+          end
+
+          def zero_width_space
+            @document.font.unicode? ? Prawn::Text::ZWSP : ""
+          end
+
+          def line_empty?
+            @line_empty && @accumulated_width == 0
           end
 
           def initialize_line(options)
@@ -103,69 +157,46 @@ module Prawn
             @kerning = options[:kerning]
             @width = options[:width]
 
-            @scan_pattern = scan_pattern
-            @word_division_scan_pattern = word_division_scan_pattern
-
             @accumulated_width = 0
-            @line_output = ""
+            @line_empty = true
+            @line_contains_more_than_one_word = false
 
             @arranger = options[:arranger]
             @arranger.initialize_line
+
+            @newline_encountered = false
+            @line_full = false
           end
 
-          def fragment_finished(fragment, finished_line)
+          def fragment_finished(fragment)
             if fragment == "\n"
-              @line_output = "\n" if @line_output.empty?
+              @newline_encountered = true
+              @line_empty = false
             else
-              update_output_based_on_last_fragment(fragment, finished_line)
-              @line_output += @output
+              update_output_based_on_last_fragment(fragment)
+              update_line_status_based_on_last_output
             end
           end
 
-          def update_output_based_on_last_fragment(fragment, finished_line)
-            remaining_text = fragment.slice(@output.length..fragment.length)
-            @output.rstrip! if finished_line
-            raise Errors::CannotFit if finished_line && @line_output.empty? &&
-              @output.empty? && !fragment.strip.empty?
-            @arranger.update_last_string(@output, remaining_text)
+          def update_output_based_on_last_fragment(fragment)
+            remaining_text = fragment.slice(@fragment_output.length..fragment.length)
+            raise Errors::CannotFit if line_finished? && line_empty? &&
+              @fragment_output.empty? && !fragment.strip.empty?
+            @arranger.update_last_string(@fragment_output, remaining_text, soft_hyphen)
           end
 
-          # returns true iff all text was printed without running into the end of
-          # the line
-          #
-          def add_fragment_to_line(fragment)
-            return true if fragment == ""
-            return false if fragment == "\n"
-            previous_segment = nil
-            fragment.scan(@scan_pattern).each do |segment|
-              @arranger.apply_font_settings do
-                segment_width = @document.width_of(segment, :kerning => @kerning)
-
-                if @accumulated_width + segment_width <= @width
-                  @accumulated_width += segment_width
-                  @output += segment
-                else
-                  end_of_the_line(segment)
-                  return false
-                end
-              end
-              previous_segment = segment
-            end
-            true
+          def line_finished?
+            @line_full || paragraph_finished?
           end
 
-          # If there is more than one word on the line, then clean up the last
-          # word on the line; otherwise, wrap by character
-          #
-          def end_of_the_line(segment)
-            if (@line_output + @output) =~ @word_division_scan_pattern
-              if segment =~ new_regexp("^#{hyphen}") &&
-                  @output !~ new_regexp("[#{break_chars}]$")
-                remove_last_output_word
-              end
-            else
-              wrap_by_char(segment)
-            end
+          def update_line_status_based_on_last_output
+            @line_contains_more_than_one_word = true if @fragment_output =~ word_division_scan_pattern
+          end
+
+          def end_of_the_line_reached(segment)
+            update_line_status_based_on_last_output
+            wrap_by_char(segment) unless @line_contains_more_than_one_word
+            @line_full = true
           end
 
           def wrap_by_char(segment)
@@ -183,13 +214,13 @@ module Prawn
           def append_char(char)
             # kerning doesn't make sense in the context of a single character
             char_width = @document.width_of(char)
-            @accumulated_width += char_width
 
-            if @accumulated_width >= @width
-              false
-            else
-              @output << char
+            if @accumulated_width + char_width <= @width
+              @accumulated_width += char_width
+              @fragment_output << char
               true
+            else
+              false
             end
           end
 

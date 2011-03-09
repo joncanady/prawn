@@ -2,8 +2,61 @@
 
 require File.join(File.expand_path(File.dirname(__FILE__)), "spec_helper")
 
+describe "Text::Box#nothing_printed?" do
+  it "should be true when nothing printed" do
+    create_pdf
+    string = "Hello world, how are you?\nI'm fine, thank you."
+    text_box = Prawn::Text::Box.new(string,
+                                    :height => 2,
+                                    :document => @pdf)
+    text_box.render
+    text_box.nothing_printed?.should.be true
+  end
+  it "should be false when something printed" do
+    create_pdf
+    string = "Hello world, how are you?\nI'm fine, thank you."
+    text_box = Prawn::Text::Box.new(string,
+                                    :height => 14,
+                                    :document => @pdf)
+    text_box.render
+    text_box.nothing_printed?.should.be false
+  end
+end
+
+describe "Text::Box#everything_printed?" do
+  it "should be false when not everything printed" do
+    create_pdf
+    string = "Hello world, how are you?\nI'm fine, thank you."
+    text_box = Prawn::Text::Box.new(string,
+                                    :height => 14,
+                                    :document => @pdf)
+    text_box.render
+    text_box.everything_printed?.should.be false
+  end
+  it "should be true when everything printed" do
+    create_pdf
+    string = "Hello world, how are you?\nI'm fine, thank you."
+    text_box = Prawn::Text::Box.new(string,
+                                    :document => @pdf)
+    text_box.render
+    text_box.everything_printed?.should.be true
+  end
+end
+
+describe "Text::Box#line_gap" do
+  it "should equal the line gap of the font when using a single " +
+    "font and font size" do
+    create_pdf
+    string = "Hello world, how are you?\nI'm fine, thank you."
+    text_box = Prawn::Text::Box.new(string,
+                                    :document => @pdf)
+    text_box.render
+    text_box.line_gap.should.be.close(@pdf.font.line_gap, 0.0001)
+  end
+end
+
 describe "Text::Box" do
-  it "should be able to set text direction document wide" do
+  it "should be able to set text direction document-wide" do
     create_pdf
     @pdf.text_direction(:rtl)
     @pdf.text_direction = :rtl
@@ -16,7 +69,19 @@ describe "Text::Box" do
     text.strings[1].should == ".uoy knaht ,enif m'I"
   end
 
-  it "option should be able to override document wide text direction" do
+  it "should be able to reverse multi-byte text" do
+    create_pdf
+    @pdf.text_direction(:rtl)
+    @pdf.text_direction = :rtl
+    @pdf.text_direction = :rtl
+    @pdf.font("#{Prawn::BASEDIR}/data/fonts/gkai00mp.ttf", :size => 16) do
+      @pdf.text "写个小"
+    end
+    text = PDF::Inspector::Text.analyze(@pdf.render)
+    text.strings[0].should == "小个写"
+  end
+
+  it "option should be able to override document-wide text direction" do
     create_pdf
     @pdf.text_direction = :rtl
     string = "Hello world, how are you?\nI'm fine, thank you."
@@ -32,7 +97,7 @@ end
 
 describe "Text::Box" do
 
-  it "should be able to set leading document wide" do
+  it "should be able to set leading document-wide" do
     create_pdf
     @pdf.default_leading(7)
     @pdf.default_leading = 7
@@ -41,7 +106,7 @@ describe "Text::Box" do
     text_box.leading.should == 7
   end
 
-  it "option should be able to override document wide leading" do
+  it "option should be able to override document-wide leading" do
     create_pdf
     @pdf.default_leading = 7
     text_box = Prawn::Text::Box.new("hello world",
@@ -58,35 +123,64 @@ end
 describe "Text::Box#render with :align => :justify" do
   it "should draw the word spacing to the document" do
     create_pdf
-    string = "hello world " * 10
+    string = "hello world " * 20
     options = { :document => @pdf, :align => :justify }
     text_box = Prawn::Text::Box.new(string, options)
     text_box.render
     contents = PDF::Inspector::Text.analyze(@pdf.render)
     contents.word_spacing[0].should.be > 0
   end
+  it "should not justify the last line of a paragraph" do
+    create_pdf
+    string = "hello world "
+    options = { :document => @pdf, :align => :justify }
+    text_box = Prawn::Text::Box.new(string, options)
+    text_box.render
+    contents = PDF::Inspector::Text.analyze(@pdf.render)
+    contents.word_spacing.should.be.empty
+  end
+end
+
+describe "Text::Box" do
+  it "should only require enough space for the descender and the ascender " +
+     "when determining whether a line can fit" do
+    create_pdf
+    text = "Oh hai text rect"
+    options = { :document => @pdf, :height => @pdf.font.ascender + @pdf.font.descender }
+    text_box = Prawn::Text::Box.new(text, options)
+    text_box.render
+    text_box.text.should == "Oh hai text rect"
+
+    text = "Oh hai text rect\nOh hai text rect"
+    options = { :document => @pdf, :height => @pdf.font.height + @pdf.font.ascender + @pdf.font.descender }
+    text_box = Prawn::Text::Box.new(text, options)
+    text_box.render
+    text_box.text.should == "Oh hai text rect\nOh hai text rect"
+  end
 end
 
 describe "Text::Box#height without leading" do
-  it "should equal the sum of the height of each line" do
+  it "should equal the sum of the height of each line, " +
+    "not including the space below the last line" do
     create_pdf
     text = "Oh hai text rect.\nOh hai text rect."
     options = { :document => @pdf }
     text_box = Prawn::Text::Box.new(text, options)
     text_box.render
-    text_box.height.should == @pdf.font.height * 2
+    text_box.height.should.be.close(@pdf.font.height * 2 - @pdf.font.line_gap, 0.001)
   end
 end
 
 describe "Text::Box#height with leading" do
-  it "should equal the sum of the height of each line" do
+  it "should equal the sum of the height of each line plus leading, " +
+    "but not including the space below the last line" do
     create_pdf
     text = "Oh hai text rect.\nOh hai text rect."
     leading = 12
     options = { :document => @pdf, :leading => leading }
     text_box = Prawn::Text::Box.new(text, options)
     text_box.render
-    text_box.height.should == @pdf.font.height * 2 + leading
+    text_box.height.should.be.close((@pdf.font.height + leading) * 2 - @pdf.font.line_gap - leading, 0.001)
   end
 end
 
@@ -390,8 +484,10 @@ describe "Text::Box with text than can fit in the box" do
     }
   end
   
-  it "printed text should match requested text, except for trailing or leading white space and that spaces may be replaced by newlines" do
-    text_box = Prawn::Text::Box.new(@text, @options)
+  it "printed text should match requested text, except that preceding and " +
+    "trailing white space will be stripped from each line, and newlines may " +
+    "be inserted" do
+    text_box = Prawn::Text::Box.new("  " + @text, @options)
     text_box.render
     text_box.text.gsub("\n", " ").should == @text.strip
   end
@@ -444,6 +540,7 @@ describe "Text::Box printing UTF-8 string with higher bit characters" do
       }.should.not.raise(Prawn::Errors::IncompatibleStringEncoding)
     end
   end
+
   describe "when using an AFM font" do
     it "unprinted text should be in WinAnsi encoding" do
       remaining_text = @text_box.render
@@ -485,7 +582,7 @@ describe "Text::Box with more text than can fit in the box" do
       @text_box.text.gsub("\n", " ").should.not == @text.strip
     end
     it "render should not return an empty string because some text remains unprinted" do
-      @text_box.render.should.not == ""
+      @text_box.render.should.not.be.empty
     end
     it "#height should be no taller than the specified height" do
       @text_box.render
@@ -510,6 +607,20 @@ describe "Text::Box with more text than can fit in the box" do
         rotated_text_box = Prawn::Text::Box.new(@text, @options)
         rotated_text_box.render.should == remaining_text
       end
+    end
+  end
+  
+  context "truncated with text and size taken from the manual" do
+    it "should return the right text" do
+      @text = "This is the beginning of the text. It will be cut somewhere and " +
+        "the rest of the text will procede to be rendered this time by " +
+        "calling another method." + " . " * 50
+      @options[:width] = 300
+      @options[:height] = 50
+      @options[:size] = 18
+      @text_box = Prawn::Text::Box.new(@text, @options)
+      remaining_text = @text_box.render
+      remaining_text.should == "text will procede to be rendered this time by calling another method. .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . "
     end
   end
 
@@ -560,7 +671,7 @@ describe "Text::Box with a solid block of Chinese characters" do
     @options[:overflow] = :truncate
     text_box = Prawn::Text::Box.new(@text, @options)
     text_box.render
-    text_box.text.gsub("\n", "").should == @text.strip
+    text_box.text.gsub("\n", "").should == @text
   end
 end
 
@@ -716,7 +827,7 @@ describe "Text::Box wrapping" do
 
     expected = "©" * 25 + "\n" + "©" * 5
     @pdf.font.normalize_encoding!(expected)
-
+    expected = expected.force_encoding("utf-8") if expected.respond_to?(:force_encoding)
     text_box.text.should == expected
   end
 

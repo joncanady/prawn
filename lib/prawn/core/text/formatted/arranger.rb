@@ -34,7 +34,7 @@ module Prawn
               raise "Lines must be finalized before calling #space_count"
             end
             @fragments.inject(0) do |sum, fragment|
-              sum + fragment.text.count(" ")
+              sum + fragment.space_count
             end
           end
 
@@ -51,12 +51,18 @@ module Prawn
             if @unfinalized_line
               raise "Lines must be finalized before calling #line"
             end
-            @fragments.collect { |fragment| fragment.text }.join("")
+            @fragments.collect do |fragment|
+              if ruby_18 { true }
+                fragment.text
+              else
+                fragment.text.dup.force_encoding("utf-8")
+              end
+            end.join
           end
 
           def finalize_line
             @unfinalized_line = false
-            remove_trailing_whitespace_from_consumed
+            omit_trailing_whitespace_from_line_width
             @fragments = []
             @consumed.each do |hash|
               text = hash[:text]
@@ -86,16 +92,13 @@ module Prawn
             @max_line_height = 0
             @max_descender = 0
             @max_ascender = 0
+
             @consumed = []
             @fragments = []
           end
 
           def finished?
             @unconsumed.length == 0
-          end
-
-          def unfinished?
-            @unconsumed.length > 0
           end
 
           def next_string
@@ -162,12 +165,13 @@ module Prawn
             end
           end
 
-          def update_last_string(printed, unprinted)
+          def update_last_string(printed, unprinted, normalized_soft_hyphen)
             return if printed.nil?
             if printed.empty?
               @consumed.pop
             else
               @consumed.last[:text] = printed
+              @consumed.last[:normalized_soft_hyphen] = normalized_soft_hyphen
             end
 
             unless unprinted.empty?
@@ -185,6 +189,7 @@ module Prawn
           def repack_unretrieved
             new_unconsumed = []
             while fragment = retrieve_fragment
+              fragment.include_trailing_white_space!
               new_unconsumed << fragment.format_state.merge(:text => fragment.text)
             end
             @unconsumed = new_unconsumed.concat(@unconsumed)
@@ -234,14 +239,17 @@ module Prawn
             end
           end
 
-          def remove_trailing_whitespace_from_consumed
+          def omit_trailing_whitespace_from_line_width
             @consumed.reverse_each do |hash|
               if hash[:text] == "\n"
                 break
               elsif hash[:text].strip.empty? && @consumed.length > 1
-                @consumed.pop
+                # this entire fragment is trailing white space
+                hash[:exclude_trailing_white_space] = true
               else
-                hash[:text].rstrip!
+                # this fragment contains the first non-white space we have
+                # encountered since the end of the line
+                hash[:exclude_trailing_white_space] = true
                 break
               end
             end

@@ -2,14 +2,14 @@
 
 require File.join(File.expand_path(File.dirname(__FILE__)), "spec_helper")
 
-describe "Core::Text::Formatted::Wrap#line_wrap" do
+describe "Core::Text::Formatted::LineWrap#wrap_line" do
   before(:each) do
     create_pdf
     @arranger = Prawn::Core::Text::Formatted::Arranger.new(@pdf)
     @line_wrap = Prawn::Core::Text::Formatted::LineWrap.new
     @one_word_width = 50
   end
-  it "should strip preceding and trailing spaces" do
+  it "should strip leading and trailing spaces" do
     array = [{ :text => " hello world, " },
              { :text => "goodbye  ", :style => [:bold] }]
     @arranger.format_array = array
@@ -17,16 +17,6 @@ describe "Core::Text::Formatted::Wrap#line_wrap" do
                                  :width => 300,
                                  :document => @pdf)
     string.should == "hello world, goodbye"
-  end
-  it "should strip trailing spaces when we try but fail to push any of a" +
-     " fragment onto the end of a line that currently ends with a space" do
-    array = [{ :text => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa " },
-             { :text => "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ", :style => [:bold] }]
-    @arranger.format_array = array
-    string = @line_wrap.wrap_line(:arranger => @arranger,
-                                 :width => 300,
-                                 :document => @pdf)
-    string.should == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   end
   it "should strip trailing spaces when a white-space-only fragment was" +
      " successfully pushed onto the end of a line but no other non-white" +
@@ -60,6 +50,26 @@ describe "Core::Text::Formatted::Wrap#line_wrap" do
     string.should == "hello"
   end
 
+  it "should break on zero-width space" do
+    @pdf.font("#{Prawn::BASEDIR}/data/fonts/DejaVuSans.ttf")
+    array = [{ :text => "hello#{Prawn::Text::ZWSP}world" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+    string.should == "hello"
+  end
+
+  it "should not display zero-width space" do
+    @pdf.font("#{Prawn::BASEDIR}/data/fonts/DejaVuSans.ttf")
+    array = [{ :text => "hello#{Prawn::Text::ZWSP}world" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => 300,
+                                  :document => @pdf)
+    string.should == "helloworld"
+  end
+
   it "should break on tab" do
     array = [{ :text => "hello\tworld" }]
     @arranger.format_array = array
@@ -77,9 +87,146 @@ describe "Core::Text::Formatted::Wrap#line_wrap" do
                                   :document => @pdf)
     string.should == "hello-"
   end
+
+  it "should not break after a hyphen that follows white space and" +
+     "precedes a word" do
+    array = [{ :text => "hello -" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+    string.should == "hello -"
+
+    array = [{ :text => "hello -world" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+    string.should == "hello"
+  end
+
+  it "should break on a soft hyphen" do
+    string = @pdf.font.normalize_encoding("hello#{Prawn::Text::SHY}world")
+    array = [{ :text => string }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+    expected = @pdf.font.normalize_encoding("hello#{Prawn::Text::SHY}")
+    expected.force_encoding("utf-8") if "".respond_to?(:force_encoding)
+    string.should == expected
+
+    @pdf.font("#{Prawn::BASEDIR}/data/fonts/DejaVuSans.ttf")
+    @line_wrap = Prawn::Core::Text::Formatted::LineWrap.new
+
+    string = "hello#{Prawn::Text::SHY}world"
+    array = [{ :text => string }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+    string.should == "hello#{Prawn::Text::SHY}"
+  end
+
+  it "should not display soft hyphens except at the end of a line" do
+    string = @pdf.font.normalize_encoding("hello#{Prawn::Text::SHY}world")
+    array = [{ :text => string }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => 300,
+                                  :document => @pdf)
+    string.should == "helloworld"
+
+    @pdf.font("#{Prawn::BASEDIR}/data/fonts/DejaVuSans.ttf")
+    @line_wrap = Prawn::Core::Text::Formatted::LineWrap.new
+
+    string = "hello#{Prawn::Text::SHY}world"
+    array = [{ :text => string }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => 300,
+                                  :document => @pdf)
+    string.should == "helloworld"
+  end
+
+  it "should not break before a hard hyphen that follows a word" do
+    enough_width_for_hello_world = 60
+
+    array = [{ :text => "hello world" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => enough_width_for_hello_world,
+                                  :document => @pdf)
+    string.should == "hello world"
+
+    array = [{ :text => "hello world-" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => enough_width_for_hello_world,
+                                  :document => @pdf)
+    string.should == "hello"
+
+    @pdf.font("#{Prawn::BASEDIR}/data/fonts/DejaVuSans.ttf")
+    @line_wrap = Prawn::Core::Text::Formatted::LineWrap.new
+    enough_width_for_hello_world = 68
+
+    array = [{ :text => "hello world" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => enough_width_for_hello_world,
+                                  :document => @pdf)
+    string.should == "hello world"
+
+    array = [{ :text => "hello world-" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => enough_width_for_hello_world,
+                                  :document => @pdf)
+    string.should == "hello"
+  end
+
+  it "should not break after a hard hyphen that follows a soft hyphen and" +
+    "precedes a word" do
+    string = @pdf.font.normalize_encoding("hello#{Prawn::Text::SHY}-")
+    array = [{ :text => string }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+    string.should == "hello-"
+
+    string = @pdf.font.normalize_encoding("hello#{Prawn::Text::SHY}-world")
+    array = [{ :text => string }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+    expected = @pdf.font.normalize_encoding("hello#{Prawn::Text::SHY}")
+    expected.force_encoding("utf-8") if "".respond_to?(:force_encoding)
+    string.should == expected
+
+    @pdf.font("#{Prawn::BASEDIR}/data/fonts/DejaVuSans.ttf")
+    @line_wrap = Prawn::Core::Text::Formatted::LineWrap.new
+
+    string = "hello#{Prawn::Text::SHY}-"
+    array = [{ :text => string }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+    string.should == "hello-"
+
+    string = "hello#{Prawn::Text::SHY}-world"
+    array = [{ :text => string }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+    string.should == "hello#{Prawn::Text::SHY}"
+  end
 end
 
-describe "Core::Text::Formatted::Wrap#space_count" do
+describe "Core::Text::Formatted::LineWrap#space_count" do
   before(:each) do
     create_pdf
     @arranger = Prawn::Core::Text::Formatted::Arranger.new(@pdf)
@@ -105,7 +252,7 @@ describe "Core::Text::Formatted::Wrap#space_count" do
   end
 end
 
-describe "Core::Text::Formatted::Wrap" do
+describe "Core::Text::Formatted::LineWrap" do
   before(:each) do
     create_pdf
     @arranger = Prawn::Core::Text::Formatted::Arranger.new(@pdf)
@@ -132,5 +279,55 @@ describe "Core::Text::Formatted::Wrap" do
                                :width => 200,
                                :document => @pdf)
     line.should.be.empty
+  end
+end
+
+describe "Core::Text::Formatted::LineWrap#paragraph_finished?" do
+  before(:each) do
+    create_pdf
+    @arranger = Prawn::Core::Text::Formatted::Arranger.new(@pdf)
+    @line_wrap = Prawn::Core::Text::Formatted::LineWrap.new
+    @one_word_width = 50
+  end
+  it "should be false when the last printed line is not the end of the paragraph" do
+    array = [{ :text => "hello world" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+
+    @line_wrap.paragraph_finished?.should == false
+  end
+  it "should be true when the last printed line is the last fragment to print" do
+    array = [{ :text => "hello world" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+
+    @line_wrap.paragraph_finished?.should == true
+  end
+  it "should be true when a newline exists on the current line" do
+    array = [{ :text => "hello\n world" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+
+    @line_wrap.paragraph_finished?.should == true
+  end
+  it "should be true when a newline exists in the next fragment" do
+    array = [{ :text => "hello " },
+             { :text => " \n" },
+             { :text => "world" }]
+    @arranger.format_array = array
+    string = @line_wrap.wrap_line(:arranger => @arranger,
+                                  :width => @one_word_width,
+                                  :document => @pdf)
+
+    @line_wrap.paragraph_finished?.should == true
   end
 end

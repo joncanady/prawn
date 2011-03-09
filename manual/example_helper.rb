@@ -142,9 +142,19 @@ module Prawn
       move_down 10
   
       text(extract_introduction_text(data), :inline_format => true)
-      
+
+      kai_file = "#{Prawn::BASEDIR}/data/fonts/gkai00mp.ttf"
+      font_families["Kai"] = {
+        :normal => { :file => kai_file, :font => "Kai" }
+      }
+      dejavu_file = "#{Prawn::BASEDIR}/data/fonts/DejaVuSans.ttf"
+      font_families["DejaVu"] = {
+        :normal => { :file => dejavu_file, :font => "DejaVu" }
+      }
+
       font('Courier', :size => 11) do
-        text example_source.gsub(' ', Prawn::Text::NBSP)
+        text(example_source.gsub(' ', Prawn::Text::NBSP),
+             :fallback_fonts => ["DejaVu", "Kai"])
       end
       
       if options[:eval_source]
@@ -154,7 +164,11 @@ module Prawn
         undash
       
         move_down 10
-        eval example_source 
+        begin
+          eval example_source
+        rescue
+          puts example_source
+        end
       end
     end
     

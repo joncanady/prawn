@@ -178,11 +178,12 @@ describe "Core::Text::Formatted::Arranger#update_last_string" do
     arranger.format_array = array
     while string = arranger.next_string
     end
-    arranger.update_last_string(" you", " now?")
+    arranger.update_last_string(" you", " now?", nil)
     arranger.consumed[3].should == { :text => " you",
-                                      :styles => [:bold, :italic] }
+                                     :styles => [:bold, :italic],
+                                     :normalized_soft_hyphen => nil }
     arranger.unconsumed.should == [{ :text => " now?",
-                                      :styles => [:bold, :italic] }]
+                                     :styles => [:bold, :italic] }]
   end
   context "when the entire string was used" do
     it "should not push empty string onto unconsumed" do
@@ -195,7 +196,7 @@ describe "Core::Text::Formatted::Arranger#update_last_string" do
     arranger.format_array = array
       while string = arranger.next_string
       end
-      arranger.update_last_string(" you now?", "")
+      arranger.update_last_string(" you now?", "", nil)
       arranger.unconsumed.should == []
     end
   end
@@ -223,7 +224,8 @@ describe "Core::Text::Formatted::Arranger#space_count" do
   end
 end
 describe "Core::Text::Formatted::Arranger#finalize_line" do
-  it "should make it so the last consumed fragment ends with non-white-space" do
+  it "should make it so that all trailing white space fragments " +
+     "exclude trailing white space" do
     create_pdf
     arranger = Prawn::Core::Text::Formatted::Arranger.new(@pdf)
     array = [{ :text => "hello " },
@@ -233,9 +235,16 @@ describe "Core::Text::Formatted::Arranger#finalize_line" do
     while string = arranger.next_string
     end
     arranger.finalize_line
-    arranger.fragments.length.should == 2
-    arranger.retrieve_fragment.text
-    arranger.retrieve_fragment.text.should == "world how"
+    arranger.fragments.length.should == 3
+
+    fragment = arranger.retrieve_fragment
+    fragment.text.should == "hello "
+
+    fragment = arranger.retrieve_fragment
+    fragment.text.should == "world how"
+
+    fragment = arranger.retrieve_fragment
+    fragment.text.should == ""
   end
 end
 
@@ -343,7 +352,7 @@ describe "Core::Text::Formatted::Arranger#finished" do
     arranger.format_array = array
     while string = arranger.next_string
     end
-    arranger.update_last_string(" you", "now?")
+    arranger.update_last_string(" you", "now?", nil)
     arranger.should.not.be.finished
   end
   it "should be false if everything was printed" do
@@ -360,47 +369,20 @@ describe "Core::Text::Formatted::Arranger#finished" do
   end
 end
 
-describe "Core::Text::Formatted::Arranger#unfinished" do
-  it "should be false if anything was not printed" do
-    create_pdf
-    arranger = Prawn::Core::Text::Formatted::Arranger.new(@pdf)
-    array = [{ :text => "hello " },
-             { :text => "world how ", :styles => [:bold] },
-             { :text => "are", :styles => [:bold, :italic] },
-             { :text => " you now?" }]
-    arranger.format_array = array
-    while string = arranger.next_string
-    end
-    arranger.update_last_string(" you", "now?")
-    arranger.should.be.unfinished
-  end
-  it "should be false if everything was printed" do
-    create_pdf
-    arranger = Prawn::Core::Text::Formatted::Arranger.new(@pdf)
-    array = [{ :text => "hello " },
-             { :text => "world how ", :styles => [:bold] },
-             { :text => "are", :styles => [:bold, :italic] },
-             { :text => " you now?" }]
-    arranger.format_array = array
-    while string = arranger.next_string
-    end
-    arranger.should.not.be.unfinished
-  end
-end
-
 describe "Core::Text::Formatted::Arranger.max_line_height" do
   it "should be the height of the maximum consumed fragment" do
     create_pdf
     arranger = Prawn::Core::Text::Formatted::Arranger.new(@pdf)
     array = [{ :text => "hello " },
              { :text => "world how ", :styles => [:bold] },
-             { :text => "are", :styles => [:bold, :italic] },
+             { :text => "are", :styles => [:bold, :italic],
+               :size => 28 },
              { :text => " you now?" }]
     arranger.format_array = array
     while string = arranger.next_string
     end
-    arranger.update_last_string(" you", "now?")
-    arranger.should.be.unfinished
+    arranger.finalize_line
+    arranger.max_line_height.should.be.close(33.32, 0.0001)
   end
 end
 

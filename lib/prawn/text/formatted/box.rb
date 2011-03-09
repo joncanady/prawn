@@ -78,7 +78,7 @@ module Prawn
       # Raises <tt>Prawn::Errrors::CannotFit</tt> if not wide enough to print
       # any text
       #
-      def formatted_text_box(array, options)
+      def formatted_text_box(array, options={})
         Text::Formatted::Box.new(array, options.merge(:document => self)).render
       end
 
@@ -100,12 +100,26 @@ module Prawn
                                               :mode, :single_line,
                                               :skip_encoding,
                                               :document,
-                                              :direction]
+                                              :direction,
+                                              :fallback_fonts]
         end
 
         # The text that was successfully printed (or, if <tt>dry_run</tt> was
-        # used, the test that would have been successfully printed)
+        # used, the text that would have been successfully printed)
         attr_reader :text
+
+        # True iff nothing printed (or, if <tt>dry_run</tt> was
+        # used, nothing would have been successfully printed)
+        def nothing_printed?
+          @nothing_printed
+        end
+
+        # True iff everything printed (or, if <tt>dry_run</tt> was
+        # used, everything would have been successfully printed)
+        def everything_printed?
+          @everything_printed
+        end
+
         # The upper left corner of the text box
         attr_reader :at
         # The line height of the last line printed
@@ -117,6 +131,9 @@ module Prawn
         # The leading used during printing
         attr_reader :leading
 
+        def line_gap
+          line_height - (ascender + descender)
+        end
 
         #
         # Example (see Prawn::Text::Core::Formatted::Wrap for what is required
@@ -128,10 +145,10 @@ module Prawn
         #
         #     def wrap(array)
         #       initialize_wrap([{ :text => 'all your base are belong to us' }])
-        #       line_to_print = @line_wrap.wrap_line(:document => @document,
-        #                                            :kerning => @kerning,
-        #                                            :width => 10000,
-        #                                            :arranger => @arranger)
+        #       @line_wrap.wrap_line(:document => @document,
+        #                            :kerning => @kerning,
+        #                            :width => 10000,
+        #                            :arranger => @arranger)
         #       fragment = @arranger.retrieve_fragment
         #       format_and_draw_fragment(fragment, 0, @line_wrap.width, 0)
         #       []
@@ -170,6 +187,8 @@ module Prawn
 
           @document          = options[:document]
           @direction         = options[:direction] || @document.text_direction
+          @fallback_fonts    = options[:fallback_fonts] ||
+                               @document.fallback_fonts
           @at                = options[:at] ||
                                [@document.bounds.left, @document.bounds.top]
           @width             = options[:width] ||
@@ -216,7 +235,8 @@ module Prawn
         # Returns any text that did not print under the current settings
         #
         def render(flags={})
-          unprinted_text = ''
+          unprinted_text = []
+
           @document.save_font do
             @document.character_spacing(@character_spacing) do
               @document.text_rendering_mode(@mode) do
@@ -256,19 +276,25 @@ module Prawn
         # 
         def height
           return 0 if @baseline_y.nil? || @descender.nil?
-          @baseline_y.abs + @line_height - @ascender
+          (@baseline_y - @descender).abs
         end
 
         # <tt>fragment</tt> is a Prawn::Text::Formatted::Fragment object
         #
         def draw_fragment(fragment, accumulated_width=0, line_width=0, word_spacing=0) #:nodoc:
           case(@align)
-          when :left, :justify
+          when :left
             x = @at[0]
           when :center
             x = @at[0] + @width * 0.5 - line_width * 0.5
           when :right
             x = @at[0] + @width - line_width
+          when :justify
+            if @direction == :ltr
+              x = @at[0]
+            else
+              x = @at[0] + @width - line_width
+            end
           end
 
           x += accumulated_width
@@ -298,16 +324,95 @@ module Prawn
           @original_array.collect { |hash| hash.dup }
         end
 
-        def original_text=(array)
-          @original_array = array
+        def original_text=(formatted_text)
+          @original_array = formatted_text
         end
 
         def normalize_encoding
-          array = original_text
-          array.each do |hash|
-            hash[:text] = @document.font.normalize_encoding(hash[:text])
+          formatted_text = original_text
+
+          unless @fallback_fonts.empty?
+            formatted_text = process_fallback_fonts(formatted_text)
           end
-          array
+
+          formatted_text.each do |hash|
+            if hash[:font]
+              @document.font(hash[:font]) do
+                hash[:text] = @document.font.normalize_encoding(hash[:text])
+              end
+            else
+              hash[:text] = @document.font.normalize_encoding(hash[:text])
+            end
+          end
+
+          formatted_text
+        end
+
+        def process_fallback_fonts(formatted_text)
+          modified_formatted_text = []
+
+          formatted_text.each do |hash|
+            fragments = analyze_glyphs_for_fallback_font_support(hash)
+            modified_formatted_text.concat(fragments)
+          end
+
+          modified_formatted_text
+        end
+
+        def analyze_glyphs_for_fallback_font_support(hash)
+          font_glyph_pairs = []
+
+          original_font = @document.font.family
+          fragment_font = hash[:font] || original_font
+          @document.font(fragment_font)
+
+          fallback_fonts = @fallback_fonts.dup
+          # always default back to the current font if the glyph is missing from
+          # all fonts
+          fallback_fonts << fragment_font
+
+          hash[:text].unpack("U*").each do |char_int|
+            char = [char_int].pack("U")
+            @document.font(fragment_font)
+            font_glyph_pairs << [find_font_for_this_glyph(char,
+                                                          @document.font.family,
+                                                          fallback_fonts.dup),
+                                 char]
+          end
+
+          @document.font(original_font)
+
+          form_fragments_from_like_font_glyph_pairs(font_glyph_pairs, hash)
+        end
+
+        def find_font_for_this_glyph(char, current_font, fallback_fonts)
+          if fallback_fonts.length == 0 || @document.font.glyph_present?(char)
+            current_font
+          else
+            current_font = fallback_fonts.shift
+            @document.font(current_font)
+            find_font_for_this_glyph(char, @document.font.family, fallback_fonts)
+          end
+        end
+
+        def form_fragments_from_like_font_glyph_pairs(font_glyph_pairs, hash)
+          fragments = []
+          fragment = nil
+          current_font = nil
+
+          font_glyph_pairs.each do |font, char|
+            if font != current_font
+              current_font = font
+              fragment = hash.dup
+              fragment[:text] = char
+              fragment[:font] = font
+              fragments << fragment
+            else
+              fragment[:text] += char
+            end
+          end
+
+          fragments
         end
 
         def move_baseline_down
@@ -334,13 +439,12 @@ module Prawn
         def process_vertical_alignment(text)
           return if @vertical_align == :top
           wrap(text)
-          line_padding = @line_height - (@ascender + @descender)
-          h = height - line_padding
+
           case @vertical_align
           when :center
-            @at[1] = @at[1] - (@height - h) * 0.5
+            @at[1] = @at[1] - (@height - height) * 0.5
           when :bottom
-            @at[1] = @at[1] - (@height - h)
+            @at[1] = @at[1] - (@height - height)
           end
           @height = height
         end
@@ -348,8 +452,7 @@ module Prawn
         # Decrease the font size until the text fits or the min font
         # size is reached
         def shrink_to_fit(text)
-          while (unprinted_text = wrap(text)).length > 0 &&
-              @font_size > @min_font_size
+          while !@everything_printed && @font_size > @min_font_size
             @font_size -= 0.5
             @document.font_size = @font_size
           end

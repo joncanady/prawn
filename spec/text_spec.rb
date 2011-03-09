@@ -16,7 +16,15 @@ describe "#height_of" do
     original_y = @pdf.y
     @pdf.text("Foo")
     new_y = @pdf.y
-    @pdf.height_of("Foo", :width => 300).should.be.close(original_y - new_y, 0.0001)
+    @pdf.height_of("Foo").should.be.close(original_y - new_y, 0.0001)
+  end
+
+  it "should omit the gap below the last descender if :final_gap => false " +
+    "is given" do
+    original_y = @pdf.y
+    @pdf.text("Foo", :final_gap => false)
+    new_y = @pdf.y
+    @pdf.height_of("Foo", :final_gap => false).should.be.close(original_y - new_y, 0.0001)
   end
 
   it "should raise CannotFit if a too-small width is given" do
@@ -93,7 +101,7 @@ describe "#text" do
     text.kerned[0].should.be false
   end
 
-  it "should be able to disable kerning document wide" do
+  it "should be able to disable kerning document-wide" do
     @pdf.default_kerning(false)
     @pdf.default_kerning = false
     @pdf.text "hello world"
@@ -101,7 +109,7 @@ describe "#text" do
     text.kerned[0].should.be false
   end
 
-  it "option should be able to override document wide kerning disabling" do
+  it "option should be able to override document-wide kerning disabling" do
     @pdf.default_kerning = false
     @pdf.text "hello world", :kerning => true
     text = PDF::Inspector::Text.analyze(@pdf.render)
@@ -149,16 +157,16 @@ describe "#text" do
     @pdf.y.should.be.close(position - 3*@pdf.font.height, 0.0001)
   end
 
-  it "should advance down the document based on font ascender only "+
-    "if final_gap is given" do
+  it "should advance only to the bottom of the final descender "+
+    "if final_gap is false" do
     position = @pdf.y
     @pdf.text "Foo", :final_gap => false
 
-    @pdf.y.should.be.close(position - @pdf.font.ascender, 0.0001)
+    @pdf.y.should.be.close(position - @pdf.font.ascender - @pdf.font.descender, 0.0001)
 
     position = @pdf.y
     @pdf.text "Foo\nBar\nBaz", :final_gap => false
-    @pdf.y.should.be.close(position - 2*@pdf.font.height - @pdf.font.ascender, 0.0001)
+    @pdf.y.should.be.close(position - 2*@pdf.font.height - @pdf.font.ascender - @pdf.font.descender, 0.0001)
   end
 
   it "should be able to print text starting at the last line of a page" do
@@ -274,9 +282,10 @@ describe "#text" do
     @pdf.move_cursor_to(@pdf.font.height)
     @pdf.text(str + "\n" + str)
 
-    # grab the text from the rendered PDF and ensure it matches
-    text = PDF::Inspector::Text.analyze(@pdf.render)
-    text.strings[1].should == str.strip
+    pages = PDF::Inspector::Page.analyze(@pdf.render).pages
+    pages.size.should == 2
+    pages[0][:strings].should == [str]
+    pages[1][:strings].should == [str]
   end
 
   it "should correctly render a string with higher bit characters across" +
@@ -285,9 +294,10 @@ describe "#text" do
     @pdf.move_cursor_to(@pdf.font.height)
     @pdf.text(str + "\n" + str, :indent_paragraphs => 20)
 
-    # grab the text from the rendered PDF and ensure it matches
-    text = PDF::Inspector::Text.analyze(@pdf.render)
-    text.strings[1].should == str.strip
+    pages = PDF::Inspector::Page.analyze(@pdf.render).pages
+    pages.size.should == 2
+    pages[0][:strings].should == [str]
+    pages[1][:strings].should == [str]
   end
 
   if "spec".respond_to?(:encode!)

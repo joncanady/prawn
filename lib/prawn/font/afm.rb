@@ -110,6 +110,14 @@ module Prawn
         [[0, options[:kerning] ? kern(text) : text]]
       end
 
+      def glyph_present?(char)
+        if char == "_"
+          true
+        else
+          normalize_encoding(char) != "_"
+        end
+      end
+
       private
 
       def register(subset)

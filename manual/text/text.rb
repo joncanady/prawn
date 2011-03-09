@@ -11,7 +11,8 @@ Prawn::Example.generate("text.pdf") do
                     "positioned_text",
                     "text_box_overflow",
                     "text_box_excess",
-                    "group"
+                    "group",
+                    "column_box"
                   ]
       ],
       [ "Styling", [ "font",
@@ -36,7 +37,9 @@ Prawn::Example.generate("text.pdf") do
                           ]
       ],
       [ "M17n", [ "utf8",
-                  "chinese_text_wrapping"
+                  "line_wrapping",
+                  "right_to_left_text",
+                  "fallback_fonts"
                 ]
       ]
     ]
@@ -50,6 +53,7 @@ Prawn::Example.generate("text.pdf") do
           "How to use text boxes and place them on specific positions",
           "What to do when a text box is too small to fit its content",
           "How to proceed when you want to prevent paragraphs from splitting between pages",
+          "Flowing text in columns",
           "How to change the text style configuring font, size, alignment and many other settings",
           "How to style specific portions of a text with inline styling and formatted text",
           "How to define formatted callbacks to reuse common styling definitions",
