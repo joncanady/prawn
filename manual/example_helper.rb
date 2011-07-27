@@ -175,8 +175,15 @@ module Prawn
     # Returns the data read from a file in a given package
     #
     def read_file(package, file)
-      File.read(File.expand_path(File.join(
-                          File.dirname(__FILE__), package, file)))
+      data = File.read(File.expand_path(File.join(
+        File.dirname(__FILE__), package, file)))
+
+      # XXX If we ever have manual files with source encodings other than
+      # UTF-8, we will need to fix this to work on Ruby 1.9.
+      if data.respond_to?(:encode!)
+        data.encode!("UTF-8")
+      end
+      data
     end
     
     # Render a page header. Used on the manual lone pages and package
@@ -266,13 +273,17 @@ module Prawn
     def extract_introduction_text(source)
       intro = source.slice(/# encoding.*?\n(.*)require File\.expand_path/m, 1)
       intro.gsub!(/\n# (?=\S)/m, ' ')
-      intro.gsub!('#', '')
+      intro.gsub!(/^#/, '')
       intro.gsub!("\n", "\n\n")
       intro.rstrip!
       
       # Process the <code> tags
       intro.gsub!(/<code>([^<]+?)<\/code>/,
                   "<font name='Courier'>\\1<\/font>")
+      
+      # Process the links
+      intro.gsub!(/(https?:\/\/\S+)/,
+                  "<link href=\"\\1\">\\1</link>")
       
       intro
     end

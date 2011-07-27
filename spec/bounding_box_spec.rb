@@ -140,6 +140,44 @@ describe "drawing bounding boxes" do
     box.height.should == 100
   end
 
+  it "should advance the y-position by bbox.height by default" do
+    orig_y = @pdf.y
+    @pdf.bounding_box [0, @pdf.cursor], :width => @pdf.bounds.width,
+        :height => 30 do
+      @pdf.text "hello"
+    end
+    @pdf.y.should.be.close(orig_y - 30, 0.001)
+  end
+
+  it "should not advance y-position if passed :hold_position => true" do
+    orig_y = @pdf.y
+    @pdf.bounding_box [0, @pdf.cursor], :width => @pdf.bounds.width,
+        :hold_position => true do
+      @pdf.text "hello"
+    end
+    # y only advances by height of one line ("hello")
+    @pdf.y.should.be.close(orig_y - @pdf.height_of("hello"), 0.001)
+  end
+
+  it "should not advance y-position of a stretchy bbox if it would stretch " +
+     "the bbox further" do
+    bottom = @pdf.y = @pdf.margin_box.absolute_bottom
+    @pdf.bounding_box [0, @pdf.margin_box.top], :width => @pdf.bounds.width do
+      @pdf.y = bottom
+      @pdf.text "hello" # starts a new page
+    end
+    @pdf.page_count.should == 2
+
+    # Restoring the position (to the absolute bottom) would stretch the bbox to
+    # the bottom of the page, which we don't want. This should be equivalent to
+    # a bbox with :hold_position => true, where we only advance by the amount
+    # that was actually drawn.
+    @pdf.y.should.be.close(
+      @pdf.margin_box.absolute_top - @pdf.height_of("hello"),
+      0.001
+    )
+  end
+
 end
 
 describe "Indentation" do
@@ -219,5 +257,117 @@ describe "A canvas" do
       @pdf.bounding_box([100,500],:width => 200) { @pdf.move_down 50 }
     end
     @pdf.y.should == 450
+  end
+end
+
+describe "Deep-copying" do
+  it "should create a new object that does not copy @document" do
+    Prawn::Document.new do
+      orig = bounds
+      copy = orig.deep_copy
+
+      copy.should.not == bounds
+      copy.document.should.be.nil
+    end
+  end
+
+  it "should deep-copy parent bounds" do
+    Prawn::Document.new do |pdf|
+      outside = pdf.bounds
+      pdf.bounding_box [100, 100], :width => 100 do
+        copy = pdf.bounds.deep_copy
+
+        # the parent bounds should have the same parameters
+        copy.parent.width.should  == outside.width
+        copy.parent.height.should == outside.height
+
+        # but should not be the same object
+        copy.parent.should.not == outside
+      end
+    end
+  end
+end
+
+describe "Prawn::Document#reference_bounds" do
+  before(:each) { create_pdf }
+
+  it "should return self for non-stretchy bounds" do
+    @pdf.bounding_box([0, @pdf.cursor], :width => 100, :height => 100) do
+      @pdf.reference_bounds.should == @pdf.bounds
+    end
+  end
+
+  it "should return the parent bounds if in a stretchy box" do
+    @pdf.bounding_box([0, @pdf.cursor], :width => 100, :height => 100) do
+      correct_bounds = @pdf.bounds
+      @pdf.bounding_box([0, @pdf.cursor], :width => 100) do
+        @pdf.reference_bounds.should == correct_bounds
+      end
+    end
+  end
+
+  it "should find the non-stretchy box through 2 levels" do
+    @pdf.bounding_box([0, @pdf.cursor], :width => 100, :height => 100) do
+      correct_bounds = @pdf.bounds
+      @pdf.bounding_box([0, @pdf.cursor], :width => 100) do
+        @pdf.bounding_box([0, @pdf.cursor], :width => 100) do
+          @pdf.reference_bounds.should == correct_bounds
+        end
+      end
+    end
+  end
+
+  it "should return the margin box if there's no explicit bbox" do
+    @pdf.reference_bounds.should == @pdf.margin_box
+
+    @pdf.bounding_box([0, @pdf.cursor], :width => 100) do
+      @pdf.reference_bounds.should == @pdf.margin_box
+    end
+  end
+
+  it "should return the canvas box if we're in a canvas" do
+    @pdf.canvas do
+      canvas_box = @pdf.bounds
+
+      @pdf.reference_bounds.should == canvas_box
+
+      @pdf.bounding_box([0, @pdf.cursor], :width => 100) do
+        @pdf.reference_bounds.should == canvas_box
+      end
+    end
+  end
+
+end
+
+describe "BoundingBox#move_past_bottom" do
+  before(:each) { create_pdf }
+
+  it "should ordinarily start a new page" do
+    @pdf.bounds.move_past_bottom
+    @pdf.text "Foo"
+
+    pages = PDF::Inspector::Page.analyze(@pdf.render).pages
+    pages.size.should == 2
+    pages[0][:strings].should == []
+    pages[1][:strings].should == ["Foo"]
+  end
+
+  it "should move to the top of the next page if it exists already" do
+    # save away the y-position at the top of a page
+    top_y = @pdf.y
+
+    # create a blank page but go to the page before it
+    @pdf.start_new_page
+    @pdf.go_to_page 1
+    @pdf.text "Foo"
+
+    @pdf.bounds.move_past_bottom
+    @pdf.y.should.be.close(top_y, 0.001) # we should be at the top
+    @pdf.text "Bar"
+
+    pages = PDF::Inspector::Page.analyze(@pdf.render).pages
+    pages.size.should == 2
+    pages[0][:strings].should == ["Foo"]
+    pages[1][:strings].should == ["Bar"]
   end
 end

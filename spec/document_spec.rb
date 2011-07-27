@@ -3,6 +3,14 @@ require "tempfile"
 
 require File.join(File.expand_path(File.dirname(__FILE__)), "spec_helper") 
 
+describe "Prawn::Document.new" do
+  it "should not modify its argument" do
+    options = {:page_layout => :landscape}
+    Prawn::Document.new(options)
+    options.should == {:page_layout => :landscape}
+  end
+end
+
 describe "The cursor" do
   it "should equal pdf.y - bounds.absolute_bottom" do
     pdf = Prawn::Document.new
@@ -99,6 +107,31 @@ describe "When beginning each new page" do
   end
   
   
+end
+
+describe "Prawn::Document#float" do
+  it "should restore the original y-position" do
+    create_pdf
+    orig_y = @pdf.y
+    @pdf.float { @pdf.text "Foo" }
+    @pdf.y.should == orig_y
+  end
+
+  it "should teleport across pages if necessary" do
+    create_pdf
+    
+    @pdf.float do
+      @pdf.text "Foo"
+      @pdf.start_new_page
+      @pdf.text "Bar"
+    end
+    @pdf.text "Baz"
+
+    pages = PDF::Inspector::Page.analyze(@pdf.render).pages
+    pages.size.should == 2
+    pages[0][:strings].should == ["Foo", "Baz"]
+    pages[1][:strings].should == ["Bar"]
+  end
 end
 
 describe "The page_number method" do
@@ -250,6 +283,15 @@ describe "When reopening pages" do
     pages[1][:strings].should == ["New page 2"]
     pages[2][:strings].should == ["Old page 2"]
   end
+
+  it "should update the bounding box to the new page's margin box" do
+    Prawn::Document.new do
+      start_new_page :layout => :landscape
+      lsize = [bounds.width, bounds.height]
+      go_to_page 1
+      [bounds.width, bounds.height].should == lsize.reverse
+    end
+  end
 end
 
 describe "When setting page size" do
@@ -292,13 +334,20 @@ describe "When setting page layout" do
     pages.first[:size].should == Prawn::Document::PageGeometry::SIZES["A4"].reverse
   end   
 
-  it "should retain page layout  by default when starting a new page" do
+  it "should retain page layout by default when starting a new page" do
     @pdf = Prawn::Document.new(:page_layout => :landscape)
     @pdf.start_new_page(:trace => true)
     pages = PDF::Inspector::Page.analyze(@pdf.render).pages
     pages.each do |page|
       page[:size].should == Prawn::Document::PageGeometry::SIZES["LETTER"].reverse
     end
+  end
+
+  it "should swap the bounds when starting a new page with different layout" do
+    @pdf = Prawn::Document.new
+    size = [@pdf.bounds.width, @pdf.bounds.height]
+    @pdf.start_new_page(:layout => :landscape)
+    [@pdf.bounds.width, @pdf.bounds.height].should == size.reverse
   end
 end
 
@@ -529,13 +578,19 @@ describe "The number_pages method" do
     @pdf.number_pages "test, <total>", {:page_filter => :all}
   end
  
-  it "must print the page if the page number matches" do
+  it "must print each page if given the :all page_filter" do
     10.times { @pdf.start_new_page }
-    @pdf.expects(:text_box).at_least_once
+    @pdf.expects(:text_box).times(10)
     @pdf.number_pages "test", {:page_filter => :all}
   end
+  
+  it "must print each page if no :page_filter is specified" do
+    10.times { @pdf.start_new_page }
+    @pdf.expects(:text_box).times(10)
+    @pdf.number_pages "test"
+  end
 
-  it "must not print the page number without a filter" do
+  it "must not print the page number if given a nil filter" do
     10.times { @pdf.start_new_page }
     @pdf.expects(:text_box).never
     @pdf.number_pages "test", {:page_filter => nil}

@@ -94,6 +94,12 @@ module Prawn
           "Arguments to text methods must be UTF-8 encoded"
       end
 
+      # Returns the number of characters in +str+ (a WinAnsi-encoded string).
+      #
+      def character_count(str)
+        str.length
+      end
+
       # Perform any changes to the string that need to happen
       # before it is rendered to the canvas. Returns an array of
       # subset "chunks", where each chunk is an array of two elements.
@@ -210,8 +216,11 @@ module Prawn
       end
 
       def latin_kern_pairs_table
-        @kern_pairs_table ||= @kern_pairs.inject({}) do |h,p|
-          h[p[0].map { |n| Encoding::WinAnsi::CHARACTERS.index(n) }] = p[1]
+        return @kern_pairs_table if defined?(@kern_pairs_table)
+        
+        character_hash = Hash[Encoding::WinAnsi::CHARACTERS.zip((0..Encoding::WinAnsi::CHARACTERS.size).to_a)]
+        @kern_pairs_table = @kern_pairs.inject({}) do |h,p|
+          h[p[0].map { |n| character_hash[n] }] = p[1]
           h
         end
       end

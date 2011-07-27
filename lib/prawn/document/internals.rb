@@ -98,6 +98,7 @@ module Prawn
           go_to_page i
           state.page.new_content_stream
           apply_margin_options(options)
+          generate_margin_box
           use_graphic_settings(options[:template])
         end
       end
@@ -106,7 +107,9 @@ module Prawn
         (1..page_count).each do |i|
           go_to_page i
           repeaters.each { |r| r.run(i) }
-          restore_graphics_state if graphic_stack.present?
+          while graphic_stack.present?
+            restore_graphics_state
+          end
           state.page.finalize
         end
       end

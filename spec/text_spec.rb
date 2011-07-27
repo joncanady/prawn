@@ -256,6 +256,12 @@ describe "#text" do
   it "should raise an exception when an unknown font is used" do
     lambda { @pdf.font "Pao bu" }.should.raise(Prawn::Errors::UnknownFont)
   end
+  
+  it "should not raise an exception when providing Pathname instance as font" do
+    lambda {
+      @pdf.font Pathname.new("#{Prawn::BASEDIR}/data/fonts/comicsans.ttf")
+    }.should.not.raise(Prawn::Errors::UnknownFont)
+  end
 
   it "should correctly render a utf-8 string when using a built-in font" do
     str = "©" # copyright symbol
@@ -380,6 +386,32 @@ describe "#text" do
         text.strings[3].should == ("hello " * 19).strip
         text.strings[4].should == ("hello " * 21).strip
       end
+    end
+  end
+
+  describe "kerning" do
+    it "should respect text kerning setting (document default)" do
+      create_pdf
+      @pdf.font.expects(:compute_width_of).with do |str, options|
+        str == "VAT" && options[:kerning] == true
+      end.at_least_once.returns(10)
+      @pdf.text "VAT"
+    end
+
+    it "should respect text kerning setting (kerning=true)" do
+      create_pdf
+      @pdf.font.expects(:compute_width_of).with do |str, options|
+        str == "VAT" && options[:kerning] == true
+      end.at_least_once.returns(10)
+      @pdf.text "VAT", :kerning => true
+    end
+
+    it "should respect text kerning setting (kerning=false)" do
+      create_pdf
+      @pdf.font.expects(:compute_width_of).with do |str, options|
+        str == "VAT" && options[:kerning] == false
+      end.at_least_once.returns(10)
+      @pdf.text "VAT", :kerning => false
     end
   end
 end

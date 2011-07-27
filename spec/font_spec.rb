@@ -20,6 +20,15 @@ describe "#width_of" do
       @pdf.width_of("hello world").should == original_width + 11 * 7
     end
   end
+
+  it "should exclude newlines" do
+    create_pdf
+    # Use a TTF font that has a non-zero width for \n
+    @pdf.font("#{Prawn::BASEDIR}/data/fonts/gkai00mp.ttf")
+
+    @pdf.width_of("\nhello world\n").should ==
+      @pdf.width_of("hello world")
+  end
 end
 
 describe "#font_size" do
@@ -351,5 +360,19 @@ describe "DFont fonts" do
     assert_not_equal f1.object_id, f2.object_id
     assert_equal f1.object_id, @pdf.find_font(@file, :font => "ActionMan").object_id
     assert_equal f2.object_id, @pdf.find_font(@file, :font => "ActionMan-Bold").object_id
+  end
+end
+
+describe "#character_count(text)" do
+  it "should work on TTF fonts" do
+    create_pdf
+    @pdf.font("#{Prawn::BASEDIR}/data/fonts/gkai00mp.ttf")
+    @pdf.font.character_count("こんにちは世界").should == 7
+    @pdf.font.character_count("Hello, world!").should == 13
+  end
+
+  it "should work on AFM fonts" do
+    create_pdf
+    @pdf.font.character_count("Hello, world!").should == 13
   end
 end

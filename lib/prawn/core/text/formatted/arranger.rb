@@ -23,10 +23,11 @@ module Prawn
           attr_reader :fragments
           attr_reader :current_format_state
 
-          def initialize(document)
+          def initialize(document, options={})
             @document = document
             @fragments = []
             @unconsumed = []
+            @kerning = options[:kerning]
           end
 
           def space_count
@@ -165,18 +166,22 @@ module Prawn
             end
           end
 
-          def update_last_string(printed, unprinted, normalized_soft_hyphen)
+          def update_last_string(printed, unprinted, normalized_soft_hyphen=nil)
             return if printed.nil?
             if printed.empty?
               @consumed.pop
             else
               @consumed.last[:text] = printed
-              @consumed.last[:normalized_soft_hyphen] = normalized_soft_hyphen
+              if normalized_soft_hyphen
+                @consumed.last[:normalized_soft_hyphen] = normalized_soft_hyphen
+              end
             end
 
             unless unprinted.empty?
               @unconsumed.unshift(@current_format_state.merge(:text => unprinted))
             end
+
+            load_previous_format_state if printed.empty?
           end
 
           def retrieve_fragment
@@ -210,6 +215,16 @@ module Prawn
           end
 
           private
+
+          def load_previous_format_state
+            if @consumed.empty?
+              @current_format_state = {}
+            else
+              hash = @consumed.last
+              @current_format_state = hash.dup
+              @current_format_state.delete(:text)
+            end
+          end
 
           def apply_font_size(size, styles)
             if subscript?(styles) || superscript?(styles)

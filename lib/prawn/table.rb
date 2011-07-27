@@ -121,6 +121,7 @@ module Prawn
       @pdf = document
       @cells = make_cells(data)
       @header = false
+      @epsilon = 1e-9
       options.each { |k, v| send("#{k}=", v) }
 
       if block
@@ -168,7 +169,7 @@ module Prawn
       when Hash
         widths.each { |i, w| column(i).width = w }
       when Numeric
-        columns.width = widths
+        cells.width = widths
       else
         raise ArgumentError, "cannot interpret column widths"
       end
@@ -227,7 +228,7 @@ module Prawn
 
       # Reference bounds are the non-stretchy bounds used to decide when to
       # flow to a new column / page.
-      ref_bounds = @pdf.bounds.stretchy? ? @pdf.margin_box : @pdf.bounds
+      ref_bounds = @pdf.reference_bounds
 
       last_y = @pdf.y
 
@@ -258,9 +259,17 @@ module Prawn
         end
       end
 
+      # Track cells to be drawn on this page. They will all be drawn when this
+      # page is finished.
+      cells_this_page = []
+
       @cells.each do |cell|
         if cell.height > (cell.y + offset) - ref_bounds.absolute_bottom &&
            cell.row > started_new_page_at_row
+          # Ink all cells on the current page
+          Cell.draw_cells(cells_this_page)
+          cells_this_page = []
+
           # start a new page or column
           @pdf.bounds.move_past_bottom
           draw_header unless cell.row == 0
@@ -285,9 +294,11 @@ module Prawn
           cell.background_color = @row_colors[index % @row_colors.length]
         end
 
-        cell.draw([x, y])
+        cells_this_page << [cell, [x, y]]
         last_y = y
       end
+      # Draw the last page of cells
+      Cell.draw_cells(cells_this_page)
 
       @pdf.move_cursor_to(last_y - @cells.last.height)
     end
@@ -303,19 +314,19 @@ module Prawn
     #
     def column_widths
       @column_widths ||= begin
-        if width < cells.min_width
+        if width - cells.min_width < -epsilon
           raise Errors::CannotFit,
             "Table's width was set too small to contain its contents " +
             "(min width #{cells.min_width}, requested #{width})"
         end
 
-        if width > cells.max_width
+        if width - cells.max_width > epsilon
           raise Errors::CannotFit,
             "Table's width was set larger than its contents' maximum width " +
             "(max width #{cells.max_width}, requested #{width})"
         end
 
-        if width < natural_width
+        if width - natural_width < -epsilon
           # Shrink the table to fit the requested width.
           f = (width - cells.min_width).to_f / (natural_width - cells.min_width)
 
@@ -323,7 +334,7 @@ module Prawn
             min, nat = column(c).min_width, column(c).width
             (f * (nat - min)) + min
           end
-        elsif width > natural_width
+        elsif width - natural_width > epsilon
           # Expand the table to fit the requested width.
           f = (width - cells.width).to_f / (cells.max_width - cells.width)
 
@@ -447,6 +458,11 @@ module Prawn
       y_positions.each_with_index { |y, i| row(i).y = y }
     end
 
+    private
+
+    def epsilon
+      @epsilon
+    end
   end
 
 

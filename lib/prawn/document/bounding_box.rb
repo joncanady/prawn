@@ -187,7 +187,9 @@ module Prawn
 
       self.y = @bounding_box.absolute_top
       user_block.call
-      self.y = @bounding_box.absolute_bottom unless options[:hold_position]
+      unless options[:hold_position] || @bounding_box.stretchy?
+        self.y = @bounding_box.absolute_bottom
+      end
 
       created_box, @bounding_box = @bounding_box, parent_box
 
@@ -435,17 +437,23 @@ module Prawn
 
       # an alias for absolute_left
       def left_side
-         absolute_left
+        absolute_left
       end
 
       # an alias for absolute_right
       def right_side
-         absolute_right
+        absolute_right
       end
 
-      # starts a new page
+      # Moves to the top of the next page of the document, starting a new page
+      # if necessary.
+      #
       def move_past_bottom
-        @document.start_new_page
+        if @document.page_number == @document.page_count
+          @document.start_new_page
+        else
+          @document.go_to_page(@document.page_number + 1)
+        end
       end
 
 
@@ -456,6 +464,39 @@ module Prawn
       #
       def stretchy?
         !@height
+      end
+
+      # Returns the innermost non-stretchy bounding box.
+      #
+      def reference_bounds
+        if stretchy?
+          raise "Can't find reference bounds: my parent is unset" unless @parent
+          @parent.reference_bounds
+        else
+          self
+        end
+      end
+
+      # Returns a deep copy of these bounds (including all parent bounds but
+      # not copying the reference to the Document).
+      #
+      def deep_copy
+        copy = dup
+        # Deep-copy the parent bounds
+        copy.instance_variable_set("@parent", if BoundingBox === @parent
+                                                @parent.deep_copy
+                                              end)
+        copy.instance_variable_set("@document", nil)
+        copy
+      end
+
+      # Restores a copy of the bounds taken by BoundingBox.deep_copy in the
+      # context of the given +document+. Does *not* set the bounds of the
+      # document to the resulting BoundingBox, only returns it.
+      #
+      def self.restore_deep_copy(bounds, document)
+        bounds.instance_variable_set("@document", document)
+        bounds
       end
 
     end

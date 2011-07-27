@@ -219,6 +219,13 @@ describe "Prawn::Table" do
         table.width.should == 300
       end
 
+      it "should accept Numeric for column_widths" do
+        table = Prawn::Table.new([%w[ a b c ], %w[d e f]], @pdf) do |t|
+          t.column_widths = 50
+        end
+        table.width.should == 150
+      end
+
       it "should calculate unspecified column widths as "+
          "(max(string_width) + 2*horizontal_padding)" do
         hpad, fs = 3, 12
@@ -485,6 +492,37 @@ describe "Prawn::Table" do
       output.pages[0][:strings].should.be.empty
       output.pages[1][:strings].should == ["Header", "Body"]
     end
+
+    it "should draw background before borders, but only within pages" do
+      seq = sequence("drawing_order")
+
+      @pdf = Prawn::Document.new
+
+      # give enough room for only the first row
+      @pdf.y = @pdf.bounds.absolute_bottom + 30
+      t = @pdf.make_table([["A", "B"],
+                           ["C", "D"]],
+            :cell_style => {:background_color => 'ff0000'})
+
+      ca = t.cells[0, 0]
+      cb = t.cells[0, 1]
+      cc = t.cells[1, 0]
+      cd = t.cells[1, 1]
+
+      # All backgrounds should draw before any borders on page 1...
+      ca.expects(:draw_background).in_sequence(seq)
+      cb.expects(:draw_background).in_sequence(seq)
+      ca.expects(:draw_borders).in_sequence(seq)
+      cb.expects(:draw_borders).in_sequence(seq)
+      # ...and page 2
+      @pdf.expects(:start_new_page).in_sequence(seq)
+      cc.expects(:draw_background).in_sequence(seq)
+      cd.expects(:draw_background).in_sequence(seq)
+      cc.expects(:draw_borders).in_sequence(seq)
+      cd.expects(:draw_borders).in_sequence(seq)
+
+      t.draw
+    end
   end
 
   describe "#style" do
@@ -581,6 +619,27 @@ describe "Prawn::Table" do
       end
     end
 
+    it "should draw all backgrounds before any borders" do
+      # lest backgrounds overlap borders:
+      # https://github.com/sandal/prawn/pull/226
+
+      seq = sequence("drawing_order")
+
+      t = @pdf.make_table([["A", "B"]],
+            :cell_style => {:background_color => 'ff0000'})
+      ca = t.cells[0, 0]
+      cb = t.cells[0, 1]
+
+      # XXX Not a perfectly general test, because it would still be acceptable
+      # if we drew B then A
+      ca.expects(:draw_background).in_sequence(seq)
+      cb.expects(:draw_background).in_sequence(seq)
+      ca.expects(:draw_borders).in_sequence(seq)
+      cb.expects(:draw_borders).in_sequence(seq)
+
+      t.draw
+    end
+
     it "should allow multiple inkings of the same table" do
       pdf = Prawn::Document.new
       t = Prawn::Table.new([["foo"]], pdf)
@@ -594,6 +653,22 @@ describe "Prawn::Table" do
 
       pdf.move_cursor_to(400)
       t.draw
+    end
+
+    describe "in stretchy bounding boxes" do
+      it "should draw all cells on a row at the same y-position" do
+        pdf = Prawn::Document.new
+        
+        text_y = pdf.y.to_i - 5 # text starts 5pt below current y pos (padding)
+
+        pdf.bounding_box([0, pdf.cursor], :width => pdf.bounds.width) do
+          pdf.expects(:draw_text!).checking { |text, options|
+            pdf.bounds.absolute_top.should == text_y
+          }.times(3)
+
+          pdf.table([%w[a b c]])
+        end
+      end
     end
   end
 
