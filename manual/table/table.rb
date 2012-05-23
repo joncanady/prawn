@@ -9,7 +9,8 @@ Prawn::Example.generate("table.pdf") do
   build_package("table", [
       [ "Basics", [ "creation",
                     "content_and_subtables",
-                    "flow_and_header"
+                    "flow_and_header",
+                    "position"
                   ]
       ],
       [ "Styling", [ "column_widths",
@@ -17,7 +18,9 @@ Prawn::Example.generate("table.pdf") do
                      "row_colors",
                      "cell_dimensions",
                      "cell_borders_and_bg",
-                     "cell_text"
+                     "cell_text",
+                     "image_cells",
+                     "span"
                    ]
       ],
       ["Initializer Block", [ "basic_block",

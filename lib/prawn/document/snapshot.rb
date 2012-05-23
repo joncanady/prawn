@@ -53,9 +53,8 @@ module Prawn
          :current_page    => state.page.dictionary.deep_copy(share=[:Parent]),
          :bounds          => bounds.deep_copy,
          :page_number     => page_number,
-         :page_kids       => state.store.pages.data[:Kids].map{|kid| kid.identifier},
-         :dests           => names? && 
-                             Marshal.load(Marshal.dump(names.data[:Dests]))}
+         :page_kids       => state.store.pages.data[:Kids].compact.map{|kid| kid.identifier},
+         :dests           => names? && names.data[:Dests].deep_copy}
       end
 
       # Rolls the page state back to the state of the given snapshot.
